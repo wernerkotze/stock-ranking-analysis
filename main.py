@@ -1,85 +1,149 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from scipy.stats import mstats
+
+def safe_get_latest_column(data, ticker, data_type):
+    """Return the latest available column of the DataFrame if it exists, otherwise log and return 0."""
+    if data is not None and not data.empty:
+        latest_date = data.columns.max()  # Get the most recent date column
+        return data[latest_date]
+    print(f"Warning: No {data_type} data available for {ticker}")
+    return pd.Series(dtype='float64')  # Return empty series if no data is available
 
 def get_financial_data(ticker):
     stock = yf.Ticker(ticker)
     
-    # Get financial statements
-    income_stmt = stock.income_stmt.iloc[:, 0]
-    balance_sheet = stock.balance_sheet.iloc[:, 0]
-    cashflow = stock.cashflow.iloc[:, 0]
+    # Safely fetch financial data
+    income_stmt = safe_get_latest_column(stock.income_stmt, ticker, "income statement")
+    balance_sheet = safe_get_latest_column(stock.balance_sheet, ticker, "balance sheet")
+    cashflow = safe_get_latest_column(stock.cashflow, ticker, "cash flow")
     info = stock.info
     
+    # Return relevant metrics
     return {
-        "Return on Equity": info.get("returnOnEquity"),
-        "Return on Assets": info.get("returnOnAssets"),
-        "Return on Invested Capital": income_stmt.get("EBIT", 0) / (balance_sheet.get("Total Assets", 0) - balance_sheet.get("Total Current Liabilities", 0)),
-        "Operating Profit Margin": info.get("operatingMargins"),
-        "Net Income Margin": info.get("profitMargins"),
-        "Gross Margin": info.get("grossMargins"),
-        "Asset Turnover": income_stmt.get("Total Revenue", 0) / balance_sheet.get("Total Assets", 0),
-        "Free Cash Flow": cashflow.get("Free Cash Flow", 0),
-        "Earnings Stability": info.get("revenueGrowth"),
-        "Debt-to-Equity": info.get("debtToEquity"),
+        "Earnings Yield": income_stmt.get("Net Income", 0) / balance_sheet.get("Total Equity", 1),
+        "Dividend Yield": info.get("dividendYield", 0),
+        "EPS Growth": info.get("earningsGrowth", 0),
+        "Sales Growth": info.get("revenueGrowth", 0),
+        "ROE": info.get("returnOnEquity", 0),
+        "ROA": info.get("returnOnAssets", 0),
+        "ROIC": income_stmt.get("EBIT", 0) / (balance_sheet.get("Total Assets", 1) - balance_sheet.get("Total Current Liabilities", 0)),
+        "Gross Margin": info.get("grossMargins", 0),
+        "Net Income Margin": info.get("profitMargins", 0),
+        "Operating Margin": info.get("operatingMargins", 0),
+        "FCF Margin": cashflow.get("Free Cash Flow", 0) / income_stmt.get("Total Revenue", 1),
+        "Debt to Equity": balance_sheet.get("Total Debt", 0) / balance_sheet.get("Total Equity", 1),
         "Interest Coverage": income_stmt.get("EBIT", 0) / income_stmt.get("Interest Expense", 1),
-        "Dividend Growth": calculate_dividend_growth(stock.dividends)
+        "Price to Sales": info.get("priceToSalesTrailing12Months", 0),
+        "Price to Book": info.get("priceToBook", 0)
     }
 
-def calculate_dividend_growth(dividends):
-    if len(dividends) < 8:
-        return 0
-    current_year = dividends[-4:].sum()
-    previous_year = dividends[-8:-4].sum()
-    return (current_year - previous_year) / previous_year if previous_year else 0
+def winsorize_and_zscore(df, columns):
+    """
+    Winsorize and Z-score normalize the specified columns in the DataFrame.
+    """
+    for col in columns:
+        if df[col].notnull().any():
+            # Winsorize at 5th and 95th percentiles
+            df[col] = mstats.winsorize(df[col], limits=[0.05, 0.05])
+            # Z-score normalization
+            df[col] = (df[col] - df[col].mean()) / df[col].std(ddof=0)
+    return df
+
+def fetch_price_movements(stocks, periods):
+    """
+    Fetch price movements for specified periods (in months) and calculate percentage changes.
+    """
+    end_date = pd.Timestamp.today()
+    price_movements = pd.DataFrame(index=stocks, columns=periods.keys())
+
+    for stock in stocks:
+        try:
+            data = yf.download(stock, start=end_date - pd.DateOffset(months=12), end=end_date, progress=False)
+            if not data.empty:
+                for period_name, months in periods.items():
+                    start_date = end_date - pd.DateOffset(months=months)
+                    start_price = data.loc[data.index >= start_date].iloc[0]["Close"]
+                    end_price = data.iloc[-1]["Close"]
+                    price_change = ((end_price - start_price) / start_price) * 100
+                    price_movements.loc[stock, period_name] = price_change
+        except Exception as e:
+            print(f"Error fetching data for {stock}: {e}")
+
+    return price_movements
 
 def rank_stocks(stocks):
     data = {}
+    
+    # Fetch data for each stock
     for stock in stocks:
-        data[stock] = get_financial_data(stock)
-        print(f"Data fetched for {stock}: {data[stock]}")
+        try:
+            data[stock] = get_financial_data(stock)
+        except Exception as e:
+            print(f"Error processing {stock}: {e}")
+            continue  # Skip ticker if any error occurs
     
-    df = pd.DataFrame(data).T
+    # Create a DataFrame with absolute values
+    df_absolute = pd.DataFrame(data).T
     
-    # Replace infinity values with NaN
-    df = df.replace([np.inf, -np.inf], np.nan)
+    # Replace infinity values with NaN and fill NaNs with 0
+    df_absolute.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df_absolute.fillna(0, inplace=True)
     
-    # Fill NaN values with 0
-    df = df.fillna(0)
+    # Save absolute values to CSV
+    df_absolute.to_csv('stock_absolute_values.csv', index=True)
+    print("\nAbsolute values table exported to 'stock_absolute_values.csv'")
     
-    # Normalize the data
-    for column in df.columns:
-        if column != "Free Cash Flow":  # Don't normalize absolute values
-            min_val = df[column].min()
-            max_val = df[column].max()
-            if min_val != max_val:
-                df[column] = (df[column] - min_val) / (max_val - min_val)
-            else:
-                df[column] = 1  # If all values are the same, set to 1
+    # List of columns to Winsorize and Z-score
+    columns_to_normalize = df_absolute.columns
     
-    # Calculate the equally weighted score
-    df['Score'] = df.drop('Free Cash Flow', axis=1).mean(axis=1)
+    # Apply Winsorizing and Z-scoring
+    df_normalized = winsorize_and_zscore(df_absolute.copy(), columns_to_normalize)
     
-    # Rank the companies based on the score
-    df['Rank'] = df['Score'].rank(ascending=False)
+    # Calculate composite score (average of all factor Z-scores)
+    df_normalized['Composite Score'] = df_normalized.mean(axis=1)
     
-    return df.sort_values('Rank')
+    # Rank stocks based on the composite score
+    df_normalized['Rank'] = df_normalized['Composite Score'].rank(ascending=False)
+    
+    # Reorder columns to put Rank and Composite Score first
+    columns_order = ['Rank', 'Composite Score'] + [col for col in df_normalized.columns if col not in ['Rank', 'Composite Score']]
+    df_normalized = df_normalized[columns_order]
+    
+    # Save rankings with normalized values to CSV
+    df_normalized.to_csv('stock_rankings.csv', index=True)
+    print("\nRanking table exported to 'stock_rankings.csv'")
+    
+    # Fetch price movements
+    periods = {"1 Month": 1, "3 Months": 3, "6 Months": 6, "9 Months": 9, "12 Months": 12}
+    df_price_movements = fetch_price_movements(stocks, periods)
+    
+    # Save price movements to CSV
+    df_price_movements.to_csv('stock_price_movements.csv', index=True)
+    print("\nPrice movements exported to 'stock_price_movements.csv'")
+    
+    # Combine financial and price movement data
+    df_combined = df_normalized.join(df_price_movements)
+    
+    # Save combined rankings to CSV
+    df_combined.to_csv('combined_rankings.csv', index=True)
+    print("\nCombined rankings exported to 'combined_rankings.csv'")
+    
+    return df_combined
 
 # List of stocks to rank
 stocks = [
-    "TTD", "IDCC", "CRWD", "ROKU", "ZS", "DOCN", "SYNC.L", "GRAB", "SSYS", "PLTR", "ESTC", "UEC",
-    "NVDA", "BAND", "WOOF", "IRDM"
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "UNH", "JNJ",
+    "XOM", "V", "PG", "MA", "LLY", "AVGO", "JPM", "HD", "CVX", "PEP",
+    "KO", "BAC", "PFE", "COST", "MRK", "WMT", "ABBV", "DIS", "DHR", "NKE",
+    "ACN", "ADBE", "MCD", "NFLX", "CRM", "TXN", "LIN", "PM", "AMD", "TMO",
+    "NEE", "INTC", "CMCSA", "AMAT", "HON", "BMY", "LOW", "IBM", "SPGI", "INTU",
+    "UNP", "QCOM", "C", "RTX", "MDT", "NOW", "AMGN", "GS", "LMT", "DE",
+    "CVS", "CAT", "ADP", "BLK", "ISRG", "ELV", "SYK", "AXP", "MO", "PLD",
+    "GE", "T", "BKNG", "ADI", "ZTS", "CSCO", "CL", "MMC", "MDLZ", "CB",
+    "GILD", "PNC", "MS", "WM", "DUK", "USB", "TJX", "BDX", "SCHW", "CI",
+    "SCHD", "SO", "ATVI", "HUM", "APD", "CCI", "TFC", "ADSK", "D", "EQIX"
 ]
 
 rankings = rank_stocks(stocks)
-
-# Reorder columns to put Rank and Score right after the ticker
-columns_order = ['Score', 'Rank'] + [col for col in rankings.columns if col not in ['Score', 'Rank']]
-rankings = rankings[columns_order]
-
-print("\nFinal ranking table:")
-print(rankings)
-
-# Export to CSV with Rank and Score right after the ticker
-rankings.to_csv('stock_rankings.csv')
-print("\nRanking table exported to 'stock_rankings.csv'")
