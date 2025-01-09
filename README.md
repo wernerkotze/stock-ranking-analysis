@@ -28,15 +28,14 @@ pip install yfinance pandas numpy
    
    ```python
    stocks = [
-       "TTD", "IDCC", "CRWD", "ROKU", "ZS", "DOCN", "SYNC.L", "GRAB", "SSYS", "PLTR", "ESTC", "UEC",
-       "NVDA", "BAND", "WOOF", "IRDM"
+       "CRWD", "ROKU", "ZS", "DOCN", "GRAB", "SSYS", "PLTR", "ESTC", "UEC", "NVDA"
    ]
    ```
 
 2. **Run the Script**: Execute the Python script to rank the stocks.
    
    ```bash
-   python rank_stocks.py
+   python3 main.py
    ```
 
 3. **Output**: The script will generate a CSV file named `stock_rankings.csv` containing the ranked list of stocks with key financial metrics.
