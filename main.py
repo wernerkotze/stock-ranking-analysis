@@ -134,16 +134,7 @@ def rank_stocks(stocks):
 
 # List of stocks to rank
 stocks = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "UNH", "JNJ",
-    "XOM", "V", "PG", "MA", "LLY", "AVGO", "JPM", "HD", "CVX", "PEP",
-    "KO", "BAC", "PFE", "COST", "MRK", "WMT", "ABBV", "DIS", "DHR", "NKE",
-    "ACN", "ADBE", "MCD", "NFLX", "CRM", "TXN", "LIN", "PM", "AMD", "TMO",
-    "NEE", "INTC", "CMCSA", "AMAT", "HON", "BMY", "LOW", "IBM", "SPGI", "INTU",
-    "UNP", "QCOM", "C", "RTX", "MDT", "NOW", "AMGN", "GS", "LMT", "DE",
-    "CVS", "CAT", "ADP", "BLK", "ISRG", "ELV", "SYK", "AXP", "MO", "PLD",
-    "GE", "T", "BKNG", "ADI", "ZTS", "CSCO", "CL", "MMC", "MDLZ", "CB",
-    "GILD", "PNC", "MS", "WM", "DUK", "USB", "TJX", "BDX", "SCHW", "CI",
-    "SCHD", "SO", "ATVI", "HUM", "APD", "CCI", "TFC", "ADSK", "D", "EQIX"
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"
 ]
 
 rankings = rank_stocks(stocks)
