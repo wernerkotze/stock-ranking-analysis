@@ -52,26 +52,51 @@ def winsorize_and_zscore(df, columns):
     return df
 
 def fetch_price_movements(stocks, periods):
-    """
-    Fetch price movements for specified periods (in months) and calculate percentage changes.
-    """
     end_date = pd.Timestamp.today()
     price_movements = pd.DataFrame(index=stocks, columns=periods.keys())
 
     for stock in stocks:
         try:
             data = yf.download(stock, start=end_date - pd.DateOffset(months=12), end=end_date, progress=False)
+            
+            # If data has a MultiIndex, rename columns explicitly
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = ["Open", "High", "Low", "Close", "Volume"]
+            
+            # Ensure data is a DataFrame
+            if isinstance(data, pd.Series):
+                data = data.to_frame().T
+            
+            print(data)  # For debugging
+            
             if not data.empty:
                 for period_name, months in periods.items():
                     start_date = end_date - pd.DateOffset(months=months)
-                    start_price = data.loc[data.index >= start_date].iloc[0]["Close"]
-                    end_price = data.iloc[-1]["Close"]
+                    filtered_data = data.loc[data.index >= start_date]
+                    
+                    # If filtering results in a Series, handle it accordingly:
+                    if isinstance(filtered_data, pd.Series):
+                        start_price = filtered_data["Close"]
+                    elif not filtered_data.empty:
+                        start_price = filtered_data.iloc[0]["Close"]
+                    else:
+                        print(f"No data for {stock} starting from {start_date}")
+                        continue
+
+                    # Get the end price from the last row
+                    end_row = data.iloc[-1]
+                    if isinstance(end_row, pd.Series):
+                        end_price = end_row["Close"]
+                    else:
+                        end_price = data.iloc[-1]["Close"]
+
                     price_change = ((end_price - start_price) / start_price) * 100
                     price_movements.loc[stock, period_name] = price_change
         except Exception as e:
             print(f"Error fetching data for {stock}: {e}")
 
     return price_movements
+
 
 def rank_stocks(stocks):
     data = {}
@@ -134,7 +159,7 @@ def rank_stocks(stocks):
 
 # List of stocks to rank
 stocks = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"
+    "AAPL", "GOOG", "AMZN"
 ]
 
 rankings = rank_stocks(stocks)

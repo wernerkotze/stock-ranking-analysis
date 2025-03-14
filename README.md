@@ -64,6 +64,32 @@ The normalization process ensures that all metrics are on a comparable scale. Ea
 - **Weighting Metrics**: All metrics are equally weighted, which may not be ideal for every situation. You can modify the script to assign different weights to metrics based on their importance.
 - **Sector-Specific Ranking**: Extending the script to rank stocks within the same industry or sector would provide more relevant comparisons.
 
+## How does the ML work?
+
+Alright! Imagine you have a **magic box** 🧙‍♂️ that looks at a bunch of numbers and tries to guess which toys will be the most fun to play with next week.  
+
+### **What This Function Does**  
+1️⃣ **Cleans up messy numbers** 🧹  
+   - Some numbers are too big or too small, so we fix them so they don’t mess up the magic box.  
+
+2️⃣ **Finds patterns** 🔍  
+   - It looks at past toy fun scores (how much kids liked them) and finds hidden clues in the numbers.  
+
+3️⃣ **Learns from history** 📚  
+   - The magic box looks at old toy data and figures out which toys became fun and which didn’t.  
+
+4️⃣ **Guesses the future** 🔮  
+   - It uses everything it learned to guess which toys will be the best next week.  
+
+5️⃣ **Ranks the toys** 🏆  
+   - It makes a list from **most fun** to **least fun**, so you know which toy to pick next!  
+
+### **Why is this cool?**  
+- Instead of randomly picking toys (or stocks), the magic box helps you make **smart choices**.  
+- It can learn and **get better** over time.  
+
+So basically, this function is like a **smart fortune-teller** for stocks, helping you guess which ones might be great to invest in! 📈💡
+
 ## License
 This project is licensed under the MIT License.
 
