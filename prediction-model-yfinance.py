@@ -7,32 +7,57 @@ from scipy.stats import zscore
 from scipy.stats.mstats import winsorize as mstats_winsorize
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
+import time
+
+# ------------------------------
+# Function to retrieve S&P 500 tickers from Wikipedia
+# ------------------------------
+def get_sp500_tickers():
+    try:
+        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        tables = pd.read_html(url, header=0)
+        sp500_df = tables[0]
+        symbols = sp500_df['Symbol'].tolist()
+        # Clean up tickers if necessary (e.g., change "." to "-" for yfinance)
+        symbols = [s.replace('.', '-') for s in symbols]
+        return symbols
+    except Exception as e:
+        print("Error fetching S&P 500 tickers:", e)
+        return []
 
 # ------------------------------
 # Fetch Fundamental Data via yfinance info
 # ------------------------------
 def get_overview(symbol):
-    ticker = yf.Ticker(symbol)
-    info = ticker.info
-    if not info or "symbol" not in info:
-        print(f"Error: No valid overview data for {symbol}")
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        if not info or "symbol" not in info:
+            print(f"Warning: No valid overview data for {symbol}")
+            return {}
+        return info
+    except Exception as e:
+        print(f"Error retrieving overview for {symbol}: {e}")
         return {}
-    return info
 
 # ------------------------------
 # Fetch Historical Price Data using yfinance download
 # ------------------------------
 def get_daily(symbol):
-    end_date = datetime.now()
-    df = yf.download(symbol, start="1900-01-01", end=end_date, progress=False)
-    if df is None or df.empty:
-        print(f"Error: No historical price data for {symbol}")
+    try:
+        end_date = datetime.now()
+        df = yf.download(symbol, start="1900-01-01", end=end_date, progress=False)
+        if df is None or df.empty:
+            print(f"Warning: No historical price data for {symbol}")
+            return None
+        df.sort_index(inplace=True)
+        # Flatten multi-index columns if necessary:
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0] for c in df.columns]
+        return df
+    except Exception as e:
+        print(f"Error downloading daily data for {symbol}: {e}")
         return None
-    df.sort_index(inplace=True)
-    # If columns come as a MultiIndex, flatten them:
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0] for c in df.columns]
-    return df
 
 # ------------------------------
 # Compute Fundamental Features from Overview Data
@@ -73,37 +98,35 @@ def get_financial_data(symbol):
 def get_additional_features(symbol, lookback_years=10):
     df = get_daily(symbol)
     if df is None or df.empty:
-        print(f"No historical price data for {symbol}")
         return {}
     
-    # Use only the last "lookback_years" of data
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365 * lookback_years)
     df = df.loc[start_date:end_date]
     
     if df.empty or "Close" not in df.columns:
-        print(f"Insufficient data for {symbol} in the period {start_date} to {end_date}")
+        print(f"Warning: Insufficient data for {symbol} in the period {start_date} to {end_date}")
         return {}
     
     close = df["Close"]
     features = {}
     
-    # Momentum factors (using approximate trading day counts)
+    # Momentum factors (approximate trading days)
     features["momentum_12m"] = (close.iloc[-1] / close.iloc[-252] - 1) if len(close) >= 252 else 0
     features["momentum_6m"]  = (close.iloc[-1] / close.iloc[-126] - 1) if len(close) >= 126 else 0
     features["momentum_3m"]  = (close.iloc[-1] / close.iloc[-63] - 1) if len(close) >= 63 else 0
-    # Future return (using last 22 trading days as approximation for 1 month)
+    # Future return (using approx. 22 trading days as a proxy for one month)
     features["future_return"] = (close.iloc[-1] / close.iloc[-22] - 1) if len(close) >= 22 else 0
 
     # Volatility (annualized standard deviation of daily returns)
     returns = close.pct_change().dropna()
     features["volatility"] = returns.std() * np.sqrt(252) if not returns.empty else 0
 
-    # Beta and idiosyncratic volatility (set defaults as these require market data)
+    # Beta and idiosyncratic volatility (defaults)
     features["beta"] = 1.0
     features["idiosyncratic_vol"] = features["volatility"]
 
-    # Average daily volume (rolling 30-day average)
+    # Average daily volume (30-day rolling average)
     if "Volume" in df.columns:
         features["avg_volume"] = df["Volume"].astype(float).rolling(window=30).mean().iloc[-1]
     else:
@@ -117,6 +140,7 @@ def get_additional_features(symbol, lookback_years=10):
 def combine_features(symbol):
     fundamentals = get_financial_data(symbol)
     additional = get_additional_features(symbol)
+    # Merge the two dictionaries. If either is empty, the result will be empty.
     combined = {**fundamentals, **additional}
     return combined
 
@@ -131,11 +155,13 @@ def build_feature_dataframe(symbols):
             if features:
                 data[sym] = features
             else:
-                print(f"No features available for {sym}")
+                print(f"Warning: No features available for {sym}")
         except Exception as e:
             print(f"Error processing {sym}: {e}")
+        # Optional: pause briefly to avoid hitting rate limits
+        time.sleep(0.2)
     df = pd.DataFrame(data).T
-    # Ensure numeric types (convert objects to numeric where possible)
+    # Convert columns to numeric, replace infinities, and fill NAs
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -157,7 +183,7 @@ def fetch_price_movements(stocks, periods):
         try:
             data = yf.download(stock, start=end_date - pd.DateOffset(months=12), end=end_date, progress=False)
             if data is None or data.empty:
-                print(f"No historical data for {stock}")
+                print(f"Warning: No historical data for {stock}")
                 continue
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = [c[0] for c in data.columns]
@@ -168,7 +194,7 @@ def fetch_price_movements(stocks, periods):
                 period_start = end_date - pd.DateOffset(months=months)
                 filtered_data = data.loc[data.index >= period_start]
                 if filtered_data.empty:
-                    print(f"No data for {stock} in period: {period_name}")
+                    print(f"Warning: No data for {stock} in period: {period_name}")
                     continue
                 start_price = filtered_data.iloc[0]["Close"]
                 end_price = filtered_data.iloc[-1]["Close"]
@@ -192,6 +218,7 @@ def run_ml_model(df, feature_cols):
     X = df[z_cols]
     y = df['future_return']
     
+    # Use a simple train-test split. For production, consider time series cross-validation.
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
     
     model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100,
@@ -211,23 +238,27 @@ def run_ml_model(df, feature_cols):
 # Main Execution
 # ------------------------------
 if __name__ == "__main__":
-    # List of sample symbols (adjust as needed)
-    symbols = ["IBM", "AAPL", "MSFT", "GOOGL", "AMZN"]
+    # Populate symbols with the S&P 500 tickers
+    symbols = get_sp500_tickers()
+    print(f"Retrieved {len(symbols)} tickers from the S&P 500.")
     
-    # Build combined feature DataFrame (fundamentals + additional features)
+    # Build combined feature DataFrame
     df_features = build_feature_dataframe(symbols)
     print("Combined Features DataFrame:")
-    print(df_features)
+    print(df_features.head())
+    
+    # Save features to CSV
     df_features.to_csv("combined_stock_features.csv", index=True)
     print("Combined stock features saved to 'combined_stock_features.csv'")
     
-    # Define feature columns (all except the target 'future_return')
+    # Define feature columns (all columns except 'future_return')
     feature_cols = [col for col in df_features.columns if col != 'future_return']
     ranked_df, model = run_ml_model(df_features, feature_cols)
+    
     ranked_df.to_csv("ml_combined_stock_rankings.csv", index=True)
     print("ML-based stock rankings saved to 'ml_combined_stock_rankings.csv'")
     
-    # Fetch additional price movement data (for extra context, not used in ML target)
+    # Fetch additional price movement data for extra context
     periods = {"1 Month": 1, "3 Months": 3, "6 Months": 6, "9 Months": 9, "12 Months": 12}
     df_price_movements = fetch_price_movements(symbols, periods)
     df_price_movements.to_csv("stock_price_movements.csv", index=True)
